@@ -7,9 +7,10 @@ with nothing to install.
 **Demo:** https://andreaacanfora.github.io/lume/ (needs a browser with WebGPU:
 recent Chrome, Edge or Safari)
 
-> v0.1 is the simulation. Next comes the light: real-time 2D global
-> illumination with radiance cascades, so lava lights up caves and smoke
-> casts soft shadows.
+Since v0.2 the world is lit by real-time 2D global illumination with
+[radiance cascades](https://github.com/Raikiri/RadianceCascadesPaper): lava
+and lamps light up caves, sand and walls cast soft shadows. Press L to
+compare with flat colours.
 
 ## Materials
 
@@ -21,6 +22,7 @@ recent Chrome, Edge or Safari)
 | 4 | Smoke | rises, drifts and fades; water boils into it on lava |
 | 5 | Wall | fixed |
 | 6 | Stone | fixed; what lava leaves behind |
+| 7 | Lamp | fixed; gives off warm light |
 | 0 | Erase | |
 
 Drag to paint. Space pauses, R reloads the opening scene.
@@ -47,11 +49,31 @@ and ripple texture) and a lifetime in 16–23.
 | --- | --- |
 | [`src/sim.wgsl`](src/sim.wgsl) | the simulation step |
 | [`src/tools.wgsl`](src/tools.wgsl) | brush and per-material census |
-| [`src/render.wgsl`](src/render.wgsl) | one pixel per cell |
+| [`src/light.wgsl`](src/light.wgsl) | radiance cascades: scene, jump flood, cascades, resolve |
+| [`src/render.wgsl`](src/render.wgsl) | one pixel per cell, lit by the fluence |
 | [`src/engine.ts`](src/engine.ts) | buffers, pipelines and dispatch |
 
 URL parameters: `?w=1920&h=1080` sets the grid size, `?steps=4` the steps per
 frame (up to 4).
+
+### Light
+
+Light runs at half the grid's resolution in four compute stages:
+
+1. **Scene**: each texel records whether it blocks light (sand, walls,
+   stone, lava, lamps; water and smoke let light through) and what it emits.
+2. **Jump flood**: every texel learns where the nearest blocking texel is,
+   so rays can leap across empty space instead of stepping cell by cell.
+3. **Cascades**: cascade 0 has a probe every 2 texels casting 4 short rays.
+   Each cascade above has probes twice as far apart, 4 times as many rays
+   and rays 4 times as long. They are traced from the top down: a ray that
+   hits nothing takes what the matching rays one cascade up saw further
+   out, blended between the four nearest upper probes. Rays that leave the
+   world see a dim night sky.
+4. **Resolve**: the 4 rays of each cascade-0 probe are averaged into the
+   light that reaches it, which the renderer samples smoothly.
+
+The cost is the same for one light or a thousand.
 
 ## Development
 
@@ -64,7 +86,8 @@ npm run test:e2e   # headless Chromium on SwiftShader's WebGPU
 
 The end-to-end test paints sand and water into a box, runs 300 steps and
 checks that not a single cell of either was created or lost, that the sand
-fell and that the water spread out.
+fell and that the water spread out. It then places a lamp beside a wall and
+checks that its light fades with distance and that the wall casts a shadow.
 
 ## License
 

@@ -1,6 +1,7 @@
 import simCode from "./sim.wgsl?raw";
 import toolsCode from "./tools.wgsl?raw";
 import renderCode from "./render.wgsl?raw";
+import lightCode from "./light.wgsl?raw";
 
 export const Material = {
   Empty: 0,
@@ -10,10 +11,11 @@ export const Material = {
   Lava: 4,
   Smoke: 5,
   Stone: 6,
+  Lamp: 7,
 } as const;
 export type Material = (typeof Material)[keyof typeof Material];
 
-export const MATERIAL_NAMES = ["empty", "wall", "sand", "water", "lava", "smoke", "stone"] as const;
+export const MATERIAL_NAMES = ["empty", "wall", "sand", "water", "lava", "smoke", "stone", "lamp"] as const;
 
 // Each step runs the two Margolus phases: blocks at (0,0) and at (1,1).
 const OFFSETS: ReadonlyArray<[number, number]> = [
@@ -44,6 +46,12 @@ export class Engine {
   private readonly paintGroup: GPUBindGroup;
   private readonly countGroup: GPUBindGroup;
   private readonly renderGroup: GPUBindGroup;
+  private readonly view: GPUBuffer;
+  private readonly fluence: GPUTexture;
+  private readonly lightPasses: { pipeline: GPUComputePipeline; group: GPUBindGroup; x: number; y: number }[] = [];
+
+  /** Whether frames are lit by the global illumination or drawn flat. */
+  lighting = true;
 
   static async create(canvas: HTMLCanvasElement, width: number, height: number): Promise<Engine> {
     if (!navigator.gpu) throw new Error("WebGPU is not available in this browser.");
@@ -132,13 +140,15 @@ export class Engine {
         { binding: 2, resource: { buffer: this.counts } },
       ],
     });
-    const view = device.createBuffer({ label: "view", size: 16, usage: S.UNIFORM | S.COPY_DST });
-    device.queue.writeBuffer(view, 0, new Uint32Array([this.width, this.height, 0, 0]));
+    this.view = device.createBuffer({ label: "view", size: 32, usage: S.UNIFORM | S.COPY_DST });
+    const fluence = (this.fluence = this.buildLight(device));
     this.renderGroup = device.createBindGroup({
       layout: this.renderPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.cells } },
-        { binding: 1, resource: { buffer: view } },
+        { binding: 1, resource: { buffer: this.view } },
+        { binding: 2, resource: fluence.createView() },
+        { binding: 3, resource: device.createSampler({ magFilter: "linear", minFilter: "linear" }) },
       ],
     });
   }
@@ -231,9 +241,129 @@ export class Engine {
     return cells;
   }
 
+  /** Computes the lighting without drawing (for tests on headless GPUs). */
+  light(): void {
+    const encoder = this.device.createCommandEncoder();
+    this.encodeLight(encoder);
+    this.device.queue.submit([encoder.finish()]);
+  }
+
+  /** Light arriving at a cell, as linear RGB. Slow; meant for tests. */
+  async lightAt(x: number, y: number): Promise<[number, number, number]> {
+    const buffer = this.device.createBuffer({ size: 256, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const encoder = this.device.createCommandEncoder();
+    encoder.copyTextureToBuffer(
+      { texture: this.fluence, origin: [Math.floor(x / 4), Math.floor(y / 4)] },
+      { buffer, bytesPerRow: 256 },
+      [1, 1],
+    );
+    this.device.queue.submit([encoder.finish()]);
+    await buffer.mapAsync(GPUMapMode.READ);
+    const half = new Uint16Array(buffer.getMappedRange().slice(0, 8));
+    buffer.destroy();
+    return [toFloat(half[0]), toFloat(half[1]), toFloat(half[2])];
+  }
+
   /** Resolves when the GPU has finished everything submitted so far. */
   idle(): Promise<void> {
     return this.device.queue.onSubmittedWorkDone();
+  }
+
+  /**
+   * Creates the textures and passes of the radiance cascades (see
+   * light.wgsl) and returns the fluence texture the renderer samples.
+   */
+  private buildLight(device: GPUDevice): GPUTexture {
+    // Light runs at half the grid's resolution. Cascade 0 probes are 2
+    // texels apart with 4 rays; each cascade doubles the spacing, quadruples
+    // the rays and the ray length. Enough cascades to cross the screen.
+    const halfW = Math.ceil(this.width / 2);
+    const halfH = Math.ceil(this.height / 2);
+    const base = 2;
+    let count = 1;
+    while ((base * (4 ** count - 1)) / 3 < Math.hypot(halfW, halfH)) count++;
+    const top = 2 << (count - 1); // block size of the top cascade
+    const w = Math.ceil(halfW / top) * top;
+    const h = Math.ceil(halfH / top) * top;
+
+    const T = GPUTextureUsage;
+    const texture = (label: string, format: GPUTextureFormat, tw = w, th = h) =>
+      device.createTexture({ label, size: [tw, th], format, usage: T.STORAGE_BINDING | T.TEXTURE_BINDING | T.COPY_SRC });
+    const scene = texture("light-scene", "rgba16float");
+    const seeds = [texture("seeds-a", "rg32float"), texture("seeds-b", "rg32float")];
+    const cascades = [texture("cascade-a", "rgba16float"), texture("cascade-b", "rgba16float")];
+    const fluence = texture("fluence", "rgba16float", w / 2, h / 2);
+
+    const module = device.createShaderModule({ label: "light", code: lightCode });
+    const pipeline = (entryPoint: string) =>
+      device.createComputePipeline({ label: entryPoint, layout: "auto", compute: { module, entryPoint } });
+    const uniform = (n: number, start = 0, end = 0) => {
+      const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      const data = new ArrayBuffer(32);
+      new Uint32Array(data, 0, 6).set([w, h, this.width, this.height, n, count]);
+      new Float32Array(data, 24, 2).set([start, end]);
+      device.queue.writeBuffer(buffer, 0, data);
+      return { binding: 0, resource: { buffer } };
+    };
+    const add = (p: GPUComputePipeline, entries: GPUBindGroupEntry[], x = w, y = h) =>
+      this.lightPasses.push({
+        pipeline: p,
+        group: device.createBindGroup({ layout: p.getBindGroupLayout(0), entries }),
+        x: Math.ceil(x / 8),
+        y: Math.ceil(y / 8),
+      });
+
+    add(pipeline("scene"), [
+      uniform(0),
+      { binding: 1, resource: { buffer: this.cells } },
+      { binding: 2, resource: scene.createView() },
+      { binding: 3, resource: seeds[0].createView() },
+    ]);
+
+    const jfa = pipeline("jfa");
+    let current = 0;
+    for (let step = 2 ** Math.floor(Math.log2(Math.max(w, h))); step >= 1; step /= 2) {
+      add(jfa, [
+        uniform(step),
+        { binding: 4, resource: seeds[current].createView() },
+        { binding: 5, resource: seeds[1 - current].createView() },
+      ]);
+      current = 1 - current;
+    }
+
+    // From the top cascade down; cascade n writes cascades[n % 2] and reads
+    // the one above from the other texture. Cascade 0 ends in cascades[0].
+    const cascade = pipeline("cascade");
+    for (let n = count - 1; n >= 0; n--) {
+      add(cascade, [
+        uniform(n, (base * (4 ** n - 1)) / 3, (base * (4 ** (n + 1) - 1)) / 3),
+        { binding: 4, resource: seeds[current].createView() },
+        { binding: 6, resource: scene.createView() },
+        { binding: 7, resource: cascades[(n + 1) % 2].createView() },
+        { binding: 8, resource: cascades[n % 2].createView() },
+      ]);
+    }
+
+    add(
+      pipeline("resolve"),
+      [uniform(0), { binding: 7, resource: cascades[0].createView() }, { binding: 9, resource: fluence.createView() }],
+      w / 2,
+      h / 2,
+    );
+
+    // The renderer maps cells to fluence texels: one per 4x4 cells.
+    device.queue.writeBuffer(this.view, 0, new Uint32Array([this.width, this.height, w * 2, h * 2]));
+    return fluence;
+  }
+
+  private encodeLight(encoder: GPUCommandEncoder): void {
+    for (const pass of this.lightPasses) {
+      const p = encoder.beginComputePass();
+      p.setPipeline(pass.pipeline);
+      p.setBindGroup(0, pass.group);
+      p.dispatchWorkgroups(pass.x, pass.y);
+      p.end();
+    }
   }
 
   private writeBrush(from: [number, number], to: [number, number], radius: number, material: number): void {
@@ -244,6 +374,8 @@ export class Engine {
   }
 
   private encodeDraw(encoder: GPUCommandEncoder): void {
+    if (this.lighting) this.encodeLight(encoder);
+    this.device.queue.writeBuffer(this.view, 16, new Uint32Array([this.lighting ? 1 : 0]));
     const pass = encoder.beginRenderPass({
       colorAttachments: [
         {
@@ -259,4 +391,13 @@ export class Engine {
     pass.draw(3);
     pass.end();
   }
+}
+
+function toFloat(h: number): number {
+  const exponent = (h >> 10) & 0x1f;
+  const mantissa = h & 0x3ff;
+  const sign = h & 0x8000 ? -1 : 1;
+  if (exponent === 0) return sign * 2 ** -14 * (mantissa / 1024);
+  if (exponent === 31) return mantissa ? NaN : sign * Infinity;
+  return sign * 2 ** (exponent - 15) * (1 + mantissa / 1024);
 }

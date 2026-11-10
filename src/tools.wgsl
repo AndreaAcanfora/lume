@@ -21,6 +21,7 @@ const EMPTY = 0u;
 const WALL = 1u;
 const SMOKE = 5u;
 const STONE = 6u;
+const LAMP = 7u;
 
 fn pcg(v: u32) -> u32 {
   let s = v * 747796405u + 2891336453u;
@@ -46,7 +47,7 @@ fn paint(@builtin(global_invocation_id) id: vec3u) {
   let r = pcg(i ^ pcg(B.seed));
   let old = cells[i] & 0xffu;
   let m = B.material;
-  let solid = m == WALL || m == STONE;
+  let solid = m == WALL || m == STONE || m == LAMP;
 
   if (m != EMPTY && !solid) {
     if (old != EMPTY && old != SMOKE) { return; }
