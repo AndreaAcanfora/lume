@@ -26,6 +26,7 @@ const WATER = 3u;
 const LAVA = 4u;
 const SMOKE = 5u;
 const STONE = 6u;
+const LAMP = 7u;
 
 fn mat(c: u32) -> u32 { return c & 0xffu; }
 
@@ -38,11 +39,11 @@ fn density(m: u32) -> i32 {
     case 3u: { return 2; }   // water
     case 4u: { return 3; }   // lava
     case 2u: { return 4; }   // sand
-    default: { return 100; } // wall, stone
+    default: { return 100; } // wall, stone, lamp
   }
 }
 
-fn movable(m: u32) -> bool { return m != WALL && m != STONE; }
+fn movable(m: u32) -> bool { return m != WALL && m != STONE && m != LAMP; }
 
 // Cells that flow sideways: liquids, gas and the air they flow into.
 fn fluid(m: u32) -> bool { return m == EMPTY || m == WATER || m == LAVA || m == SMOKE; }

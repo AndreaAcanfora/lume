@@ -9,6 +9,7 @@ const PALETTE: { material: Material; label: string; key: string }[] = [
   { material: Material.Smoke, label: "Smoke", key: "4" },
   { material: Material.Wall, label: "Wall", key: "5" },
   { material: Material.Stone, label: "Stone", key: "6" },
+  { material: Material.Lamp, label: "Lamp", key: "7" },
   { material: Material.Empty, label: "Erase", key: "0" },
 ];
 
@@ -16,6 +17,7 @@ const canvas = document.querySelector<HTMLCanvasElement>("#world")!;
 const toolbar = document.querySelector<HTMLDivElement>("#tools")!;
 const sizeInput = document.querySelector<HTMLInputElement>("#size")!;
 const pauseButton = document.querySelector<HTMLButtonElement>("#pause")!;
+const lightButton = document.querySelector<HTMLButtonElement>("#light")!;
 const resetButton = document.querySelector<HTMLButtonElement>("#reset")!;
 const clearButton = document.querySelector<HTMLButtonElement>("#clear")!;
 const hud = document.querySelector<HTMLSpanElement>("#hud")!;
@@ -70,7 +72,13 @@ function reset(): void {
 }
 reset();
 
+function toggleLight(): void {
+  engine.lighting = !engine.lighting;
+  lightButton.setAttribute("aria-pressed", String(engine.lighting));
+}
+
 pauseButton.addEventListener("click", () => setPaused(!paused));
+lightButton.addEventListener("click", toggleLight);
 resetButton.addEventListener("click", reset);
 clearButton.addEventListener("click", () => engine.clear());
 
@@ -82,6 +90,7 @@ addEventListener("keydown", (e) => {
     setPaused(!paused);
     e.preventDefault();
   } else if (e.key === "r") reset();
+  else if (e.key === "l") toggleLight();
 });
 
 // Pointer → cell coordinates. The canvas keeps its aspect ratio with

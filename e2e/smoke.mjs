@@ -88,6 +88,31 @@ try {
   check(waterAfter.span > waterBefore.span + 20, `water spread out (width ${waterBefore.span} → ${waterAfter.span})`);
   check(after.wall === before.wall && after.stone === before.stone, "solids do not move or vanish");
 
+  // Light: a lamp in an empty world lights its surroundings, less with
+  // distance, and a wall casts a shadow.
+  const light = await page.evaluate(async () => {
+    const { engine } = window.lume;
+    engine.clear();
+    engine.paint(7, [60, 80], [60, 80], 4); // lamp
+    engine.paint(1, [120, 40], [120, 120], 3); // wall to its right
+    const lum = async (x, y) => (await engine.lightAt(x, y)).reduce((a, b) => a + b, 0);
+    const points = { near: [76, 80], far: [60, 20], lit: [110, 80], shadow: [140, 80] };
+    const sample = async () => {
+      engine.light();
+      const out = {};
+      for (const [k, [x, y]] of Object.entries(points)) out[k] = await lum(x, y);
+      return out;
+    };
+    // The lamp's own contribution: with it minus without it (the sky).
+    const withLamp = await sample();
+    engine.paint(0, [60, 80], [60, 80], 5);
+    const withoutLamp = await sample();
+    return Object.fromEntries(Object.keys(points).map((k) => [k, withLamp[k] - withoutLamp[k]]));
+  });
+  console.log("light", light);
+  check(light.near > light.far && light.far > 0, "light fades with distance");
+  check(light.lit > light.shadow * 2, "a wall casts a shadow");
+
   // The opening scene should run at full size without errors.
   await page.goto(`http://localhost:${PORT}/?draw=0`);
   await page.waitForFunction(() => window.lume, null, { timeout: 20000 });
