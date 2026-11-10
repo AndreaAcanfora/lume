@@ -36,19 +36,40 @@ fn palette(m: u32) -> vec3f {
   }
 }
 
+fn fluenceAt(pos: vec2f) -> vec3f {
+  return textureSampleLevel(fluence, linearSampler, pos / vec2f(V.cover), 0.0).rgb;
+}
+
+// Light probes inside a solid see only the solid itself, so they read black.
+// A solid cell instead takes the brightest light found in the open just
+// outside it, fading with distance: surfaces light up, interiors stay dark.
+fn surfaceLight(pos: vec2f) -> vec3f {
+  var best = fluenceAt(pos);
+  for (var k = 0; k < 8; k++) {
+    let a = f32(k) * 0.785398163;
+    let dir = vec2f(cos(a), sin(a));
+    for (var j = 0; j < 3; j++) {
+      let d = array<f32, 3>(3.0, 6.0, 10.0)[j];
+      best = max(best, fluenceAt(pos + dir * d) * (1.0 - d / 14.0));
+    }
+  }
+  return best;
+}
+
 // Light the flat colour with the fluence from the radiance cascades.
 // Emitters glow at full strength; air shows a faint haze of the light that
 // crosses it, which is what makes the light visible around a source.
 fn shade(color: vec3f, m: u32, pos: vec2f) -> vec3f {
   if (V.lit == 0u) { return color; }
-  let light = textureSampleLevel(fluence, linearSampler, pos / vec2f(V.cover), 0.0).rgb;
   var c: vec3f;
   if (m == 4u || m == 7u) {
     c = color * 1.6;
   } else if (m == 0u) {
-    c = color * 0.4 + light * 0.35;
+    c = color * 0.4 + fluenceAt(pos) * 0.12;
+  } else if (m == 1u || m == 2u || m == 6u) {
+    c = color * (0.04 + surfaceLight(pos) * 2.5);
   } else {
-    c = color * (0.04 + light * 4.0);
+    c = color * (0.04 + fluenceAt(pos) * 2.5);
   }
   return 1.0 - exp(-c * 1.6); // tone map
 }
