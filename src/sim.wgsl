@@ -5,7 +5,7 @@
 // the update runs in place with no races and no second buffer. Alternating the
 // block offset between (0,0) and (1,1) lets matter cross block borders.
 //
-// A cell is a u32: bits 0-7 material, 8-15 shade, 16-23 life (for smoke).
+// A cell is a u32: bits 0-7 material, 8-15 shade, 16-23 life (smoke, fire).
 
 struct Params {
   size: vec2u,
@@ -27,6 +27,9 @@ const LAVA = 4u;
 const SMOKE = 5u;
 const STONE = 6u;
 const LAMP = 7u;
+const FIRE = 8u;
+const WOOD = 9u;
+const ASH = 10u;
 
 fn mat(c: u32) -> u32 { return c & 0xffu; }
 
@@ -35,22 +38,25 @@ fn mat(c: u32) -> u32 { return c & 0xffu; }
 fn density(m: u32) -> i32 {
   switch m {
     case 5u: { return 0; }   // smoke
-    case 0u: { return 1; }   // empty
-    case 3u: { return 2; }   // water
-    case 4u: { return 3; }   // lava
-    case 2u: { return 4; }   // sand
-    default: { return 100; } // wall, stone, lamp
+    case 8u: { return 5; }   // fire
+    case 0u: { return 10; }  // empty
+    case 3u: { return 20; }  // water
+    case 10u: { return 25; } // ash
+    case 4u: { return 30; }  // lava
+    case 2u: { return 40; }  // sand
+    default: { return 100; } // wall, stone, lamp, wood
   }
 }
 
-fn movable(m: u32) -> bool { return m != WALL && m != STONE && m != LAMP; }
+fn movable(m: u32) -> bool { return m != WALL && m != STONE && m != LAMP && m != WOOD; }
 
 // Cells that flow sideways: liquids, gas and the air they flow into.
-fn fluid(m: u32) -> bool { return m == EMPTY || m == WATER || m == LAVA || m == SMOKE; }
+fn fluid(m: u32) -> bool { return m == EMPTY || m == WATER || m == LAVA || m == SMOKE || m == FIRE; }
 
 // Lava is viscous: it moves on only some of the passes.
 fn mobility(m: u32) -> u32 {
   if (m == LAVA) { return 96u; }
+  if (m == FIRE) { return 160u; } // flickers upward rather than shooting
   return 256u;
 }
 
@@ -96,6 +102,17 @@ fn step(@builtin(global_invocation_id) id: vec3u) {
     tr = react(tr, r >> 3u);
     bl = react(bl, r >> 6u);
     br = react(br, r >> 9u);
+  }
+  r = pcg(r);
+
+  // Fire and lava set wood alight, a little at a time, so it burns down
+  // over a second or two. Fire touching water goes out in a puff of steam.
+  let hasHeat = hasLava || mat(tl) == FIRE || mat(tr) == FIRE || mat(bl) == FIRE || mat(br) == FIRE;
+  if (hasHeat) {
+    tl = burn(tl, hasWater, r);
+    tr = burn(tr, hasWater, r >> 8u);
+    bl = burn(bl, hasWater, r >> 16u);
+    br = burn(br, hasWater, r >> 24u);
   }
   r = pcg(r);
 
@@ -147,7 +164,7 @@ fn spreads(a: u32, b: u32, roll: u32) -> bool {
   let ma = mat(a);
   let mb = mat(b);
   if (ma == mb || !fluid(ma) || !fluid(mb)) { return false; }
-  let open = ma == EMPTY || mb == EMPTY || ma == SMOKE || mb == SMOKE;
+  let open = ma == EMPTY || mb == EMPTY || ma == SMOKE || mb == SMOKE || ma == FIRE || mb == FIRE;
   if (!open) { return false; }
   let speed = min(mobility(ma), mobility(mb)) / 2u;
   return (roll & 0xffu) < speed;
@@ -162,11 +179,37 @@ fn react(c: u32, roll: u32) -> u32 {
   }
 }
 
-// Smoke thins out and disappears.
+fn withLife(m: u32, c: u32, life: u32) -> u32 {
+  return m | (c & 0xff00u) | (min(life, 255u) << 16u);
+}
+
+fn burn(c: u32, wet: bool, roll: u32) -> u32 {
+  let m = mat(c);
+  if (m == WOOD && (roll & 31u) == 0u) {
+    // Most of the wood goes up in flames; some is left as ash.
+    if (((roll >> 5u) & 3u) == 0u) { return ASH | (c & 0xff00u); }
+    return withLife(FIRE, c, 60u + ((roll >> 7u) & 63u));
+  }
+  if (m == FIRE && wet) { return withLife(SMOKE, c, 100u + ((roll >> 7u) & 63u)); }
+  return c;
+}
+
+// Smoke thins out and disappears; fire burns out into smoke or nothing.
 fn age(c: u32, roll: u32) -> u32 {
-  if (mat(c) != SMOKE) { return c; }
+  let m = mat(c);
   let life = (c >> 16u) & 0xffu;
-  if ((roll & 3u) != 0u) { return c; }
-  if (life <= 1u) { return EMPTY | (c & 0xff00u); }
-  return (c & 0xff00ffffu) | ((life - 1u) << 16u);
+  if (m == SMOKE) {
+    if ((roll & 3u) != 0u) { return c; }
+    if (life <= 1u) { return EMPTY | (c & 0xff00u); }
+    return withLife(SMOKE, c, life - 1u);
+  }
+  if (m == FIRE) {
+    if ((roll & 1u) != 0u) { return c; }
+    if (life <= 1u) {
+      if (((roll >> 1u) & 1u) == 0u) { return withLife(SMOKE, c, 80u + ((roll >> 2u) & 63u)); }
+      return EMPTY | (c & 0xff00u);
+    }
+    return withLife(FIRE, c, life - 1u);
+  }
+  return c;
 }

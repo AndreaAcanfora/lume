@@ -13,8 +13,8 @@ function mulberry32(seed: number): () => number {
 
 /**
  * The opening scene: rolling stone hills, a basin of water with lava about
- * to drop into it, and a block of sand on a ledge that collapses and pours
- * off the edge.
+ * to drop into it, a block of sand on a ledge that collapses and pours off
+ * the edge, and two trees on the right hill, one of them on fire.
  */
 export function openingScene(width: number, height: number, seed = 7): Uint32Array {
   const rand = mulberry32(seed);
@@ -69,6 +69,34 @@ export function openingScene(width: number, height: number, seed = 7): Uint32Arr
   for (let x = ledgeX0 + Math.floor((ledgeX1 - ledgeX0) * 0.3); x < ledgeX1; x++) {
     for (let y = ledgeY - blockH; y < ledgeY; y++) set(x, y, Material.Sand);
   }
+
+  // Two trees on the right hill; the nearer one has caught fire.
+  const tree = (tx: number, burning: boolean) => {
+    const base = ground[tx];
+    const trunkH = Math.floor(height * 0.09);
+    for (let y = base - trunkH; y < base; y++) {
+      for (let x = tx - 2; x <= tx + 2; x++) set(x, y, Material.Wood);
+    }
+    const r = Math.floor(height * 0.045);
+    const cy = base - trunkH - r + 2;
+    for (let y = -r; y <= r; y++) {
+      for (let x = -r; x <= r; x++) {
+        if (x * x + y * y <= r * r && rand() < 0.8) set(tx + x, cy + y, Material.Wood);
+      }
+    }
+    if (burning) {
+      for (let x = tx - 6; x <= tx + 6; x++) {
+        for (let y = base - 4; y < base; y++) {
+          const i = y * width + x;
+          if (x >= 0 && x < width && (cells[i] & 0xff) === Material.Empty) {
+            cells[i] = Material.Fire | (Math.floor(rand() * 256) << 8) | ((60 + Math.floor(rand() * 60)) << 16);
+          }
+        }
+      }
+    }
+  };
+  tree(Math.floor(width * 0.8), true);
+  tree(Math.floor(width * 0.9), false);
 
   return cells;
 }

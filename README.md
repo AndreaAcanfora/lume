@@ -9,7 +9,8 @@ recent Chrome, Edge or Safari)
 
 Since v0.2 the world is lit by real-time 2D global illumination with
 [radiance cascades](https://github.com/Raikiri/RadianceCascadesPaper): lava
-and lamps light up caves, sand and walls cast soft shadows. Press L to
+and lamps light up caves, sand and walls cast soft shadows, light under water
+turns blue-green, smoke dims it and fire flickers through it. Press L to
 compare with flat colours.
 
 ## Materials
@@ -23,6 +24,9 @@ compare with flat colours.
 | 5 | Wall | fixed |
 | 6 | Stone | fixed; what lava leaves behind |
 | 7 | Lamp | fixed; gives off warm light |
+| 8 | Fire | rises, flickers and burns out into smoke; sets wood alight, goes out in water |
+| 9 | Wood | fixed; burns down to ash when fire or lava touches it |
+| | Ash | what burnt wood leaves; a light powder |
 | 0 | Erase | |
 
 Drag to paint. Space pauses, R reloads the opening scene.
@@ -60,15 +64,21 @@ frame (up to 4).
 
 Light runs at half the grid's resolution in four compute stages:
 
-1. **Scene**: each texel records whether it blocks light (sand, walls,
-   stone, lava, lamps; water and smoke let light through) and what it emits.
-2. **Jump flood**: every texel learns where the nearest blocking texel is,
-   so rays can leap across empty space instead of stepping cell by cell.
+1. **Scene**: each texel records what it emits and how much light it
+   absorbs per texel of travel, per colour channel. Sand, ash, wood, walls,
+   stone, lava and lamps are opaque. Water absorbs red first, so light
+   under water turns blue-green; smoke greys light out by its density; fire
+   glows and barely absorbs.
+2. **Jump flood**: every texel learns where the nearest non-empty texel is,
+   so rays leap across empty air; through water, smoke and fire they step
+   one texel at a time, gathering light and losing some as they go.
 3. **Cascades**: cascade 0 has a probe every 2 texels casting 4 short rays.
    Each cascade above has probes twice as far apart, 4 times as many rays
-   and rays 4 times as long. They are traced from the top down: a ray that
-   hits nothing takes what the matching rays one cascade up saw further
-   out, blended between the four nearest upper probes. Rays that leave the
+   and rays 4 times as long. They are traced from the top down: whatever a
+   ray does not block, it takes from the matching rays one cascade up,
+   blended between the four nearest upper probes and tinted by what the ray
+   passed through. A cascade texel packs radiance and transmittance (both
+   RGB) into half floats. Rays that leave the
    world see a dim night sky.
 4. **Resolve**: the 4 rays of each cascade-0 probe are averaged into the
    light that reaches it, which the renderer samples smoothly.
@@ -87,7 +97,9 @@ npm run test:e2e   # headless Chromium on SwiftShader's WebGPU
 The end-to-end test paints sand and water into a box, runs 300 steps and
 checks that not a single cell of either was created or lost, that the sand
 fell and that the water spread out. It then places a lamp beside a wall and
-checks that its light fades with distance and that the wall casts a shadow.
+checks that its light fades with distance and that the wall casts a shadow,
+that the same lamp seen through water is dimmer and bluer and through smoke
+dimmer, and that fire burns a log down to ash.
 
 ## License
 

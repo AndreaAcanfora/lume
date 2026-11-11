@@ -32,6 +32,9 @@ fn palette(m: u32) -> vec3f {
     case 5u: { return vec3f(0.62, 0.62, 0.66); } // smoke
     case 6u: { return vec3f(0.26, 0.22, 0.22); } // stone
     case 7u: { return vec3f(1.00, 0.92, 0.75); } // lamp
+    case 8u: { return vec3f(1.00, 0.55, 0.12); } // fire
+    case 9u: { return vec3f(0.45, 0.28, 0.14); } // wood
+    case 10u: { return vec3f(0.55, 0.53, 0.50); } // ash
     default: { return BACKGROUND; }
   }
 }
@@ -62,11 +65,11 @@ fn surfaceLight(pos: vec2f) -> vec3f {
 fn shade(color: vec3f, m: u32, pos: vec2f) -> vec3f {
   if (V.lit == 0u) { return color; }
   var c: vec3f;
-  if (m == 4u || m == 7u) {
+  if (m == 4u || m == 7u || m == 8u) {
     c = color * 1.6;
   } else if (m == 0u) {
     c = color * 0.4 + fluenceAt(pos) * 0.12;
-  } else if (m == 1u || m == 2u || m == 6u) {
+  } else if (m == 1u || m == 2u || m == 6u || m == 9u || m == 10u) {
     c = color * (0.04 + surfaceLight(pos) * 2.5);
   } else {
     c = color * (0.04 + fluenceAt(pos) * 2.5);
@@ -90,6 +93,11 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   if (m == 5u) {
     let life = f32((cell >> 16u) & 0xffu) / 255.0;
     color = mix(BACKGROUND, color, clamp(life * 1.4, 0.0, 0.85));
+  }
+  if (m == 8u) {
+    // Young fire burns yellow-white, dying fire deep red.
+    let life = f32((cell >> 16u) & 0xffu) / 120.0;
+    color = mix(vec3f(0.75, 0.12, 0.03), vec3f(1.0, 0.85, 0.4), clamp(life, 0.0, 1.0)) * (0.8 + 0.4 * grain);
   }
   return vec4f(shade(color, m, pos.xy), 1.0);
 }
