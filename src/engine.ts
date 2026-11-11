@@ -12,10 +12,13 @@ export const Material = {
   Smoke: 5,
   Stone: 6,
   Lamp: 7,
+  Fire: 8,
+  Wood: 9,
+  Ash: 10,
 } as const;
 export type Material = (typeof Material)[keyof typeof Material];
 
-export const MATERIAL_NAMES = ["empty", "wall", "sand", "water", "lava", "smoke", "stone", "lamp"] as const;
+export const MATERIAL_NAMES = ["empty", "wall", "sand", "water", "lava", "smoke", "stone", "lamp", "fire", "wood", "ash"] as const;
 
 // Each step runs the two Margolus phases: blocks at (0,0) and at (1,1).
 const OFFSETS: ReadonlyArray<[number, number]> = [
@@ -48,6 +51,7 @@ export class Engine {
   private readonly renderGroup: GPUBindGroup;
   private readonly view: GPUBuffer;
   private readonly fluence: GPUTexture;
+  private readonly time: GPUBuffer;
   private readonly lightPasses: { pipeline: GPUComputePipeline; group: GPUBindGroup; x: number; y: number }[] = [];
 
   /** Whether frames are lit by the global illumination or drawn flat. */
@@ -84,8 +88,8 @@ export class Engine {
       usage: S.STORAGE | S.COPY_DST | S.COPY_SRC,
     });
     this.brush = device.createBuffer({ label: "brush", size: 48, usage: S.UNIFORM | S.COPY_DST });
-    this.counts = device.createBuffer({ label: "counts", size: 32, usage: S.STORAGE | S.COPY_DST | S.COPY_SRC });
-    this.countsRead = device.createBuffer({ label: "counts-read", size: 32, usage: S.MAP_READ | S.COPY_DST });
+    this.counts = device.createBuffer({ label: "counts", size: 64, usage: S.STORAGE | S.COPY_DST | S.COPY_SRC });
+    this.countsRead = device.createBuffer({ label: "counts-read", size: 64, usage: S.MAP_READ | S.COPY_DST });
     this.params = Array.from({ length: MAX_STEPS * OFFSETS.length }, (_, i) =>
       device.createBuffer({ label: `params-${i}`, size: 32, usage: S.UNIFORM | S.COPY_DST }),
     );
@@ -140,6 +144,7 @@ export class Engine {
         { binding: 2, resource: { buffer: this.counts } },
       ],
     });
+    this.time = device.createBuffer({ label: "time", size: 4, usage: S.UNIFORM | S.COPY_DST });
     this.view = device.createBuffer({ label: "view", size: 32, usage: S.UNIFORM | S.COPY_DST });
     const fluence = (this.fluence = this.buildLight(device));
     this.renderGroup = device.createBindGroup({
@@ -220,7 +225,7 @@ export class Engine {
     pass.setBindGroup(0, this.countGroup);
     pass.dispatchWorkgroups(Math.ceil(this.cellCount / 64));
     pass.end();
-    encoder.copyBufferToBuffer(this.counts, 0, this.countsRead, 0, 32);
+    encoder.copyBufferToBuffer(this.counts, 0, this.countsRead, 0, 64);
     this.device.queue.submit([encoder.finish()]);
     await this.countsRead.mapAsync(GPUMapMode.READ);
     const raw = new Uint32Array(this.countsRead.getMappedRange().slice(0));
@@ -291,7 +296,8 @@ export class Engine {
       device.createTexture({ label, size: [tw, th], format, usage: T.STORAGE_BINDING | T.TEXTURE_BINDING | T.COPY_SRC });
     const scene = texture("light-scene", "rgba16float");
     const seeds = [texture("seeds-a", "rg32float"), texture("seeds-b", "rg32float")];
-    const cascades = [texture("cascade-a", "rgba16float"), texture("cascade-b", "rgba16float")];
+    const medium = texture("light-medium", "rgba16float");
+    const cascades = [texture("cascade-a", "rgba32uint"), texture("cascade-b", "rgba32uint")];
     const fluence = texture("fluence", "rgba16float", w / 2, h / 2);
 
     const module = device.createShaderModule({ label: "light", code: lightCode });
@@ -318,6 +324,8 @@ export class Engine {
       { binding: 1, resource: { buffer: this.cells } },
       { binding: 2, resource: scene.createView() },
       { binding: 3, resource: seeds[0].createView() },
+      { binding: 10, resource: { buffer: this.time } },
+      { binding: 11, resource: medium.createView() },
     ]);
 
     const jfa = pipeline("jfa");
@@ -341,6 +349,7 @@ export class Engine {
         { binding: 6, resource: scene.createView() },
         { binding: 7, resource: cascades[(n + 1) % 2].createView() },
         { binding: 8, resource: cascades[n % 2].createView() },
+        { binding: 12, resource: medium.createView() },
       ]);
     }
 
@@ -357,6 +366,7 @@ export class Engine {
   }
 
   private encodeLight(encoder: GPUCommandEncoder): void {
+    this.device.queue.writeBuffer(this.time, 0, new Uint32Array([this.frame]));
     for (const pass of this.lightPasses) {
       const p = encoder.beginComputePass();
       p.setPipeline(pass.pipeline);

@@ -15,13 +15,15 @@ struct Brush {
 
 @group(0) @binding(0) var<storage, read_write> cells: array<u32>;
 @group(0) @binding(1) var<uniform> B: Brush;
-@group(0) @binding(2) var<storage, read_write> counts: array<atomic<u32>, 8>;
+@group(0) @binding(2) var<storage, read_write> counts: array<atomic<u32>, 16>;
 
 const EMPTY = 0u;
 const WALL = 1u;
 const SMOKE = 5u;
 const STONE = 6u;
 const LAMP = 7u;
+const FIRE = 8u;
+const WOOD = 9u;
 
 fn pcg(v: u32) -> u32 {
   let s = v * 747796405u + 2891336453u;
@@ -47,7 +49,7 @@ fn paint(@builtin(global_invocation_id) id: vec3u) {
   let r = pcg(i ^ pcg(B.seed));
   let old = cells[i] & 0xffu;
   let m = B.material;
-  let solid = m == WALL || m == STONE || m == LAMP;
+  let solid = m == WALL || m == STONE || m == LAMP || m == WOOD;
 
   if (m != EMPTY && !solid) {
     if (old != EMPTY && old != SMOKE) { return; }
@@ -55,6 +57,7 @@ fn paint(@builtin(global_invocation_id) id: vec3u) {
   }
   var life = 0u;
   if (m == SMOKE) { life = 120u + ((r >> 16u) & 127u); }
+  if (m == FIRE) { life = 50u + ((r >> 16u) & 63u); }
   cells[i] = m | (((r >> 8u) & 0xffu) << 8u) | (life << 16u);
 }
 
@@ -62,5 +65,5 @@ fn paint(@builtin(global_invocation_id) id: vec3u) {
 fn count(@builtin(global_invocation_id) id: vec3u) {
   let i = id.x;
   if (i >= B.size_x * B.size_y) { return; }
-  atomicAdd(&counts[min(cells[i] & 0xffu, 7u)], 1u);
+  atomicAdd(&counts[min(cells[i] & 0xffu, 15u)], 1u);
 }

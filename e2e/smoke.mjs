@@ -113,6 +113,54 @@ try {
   check(light.near > light.far && light.far > 0, "light fades with distance");
   check(light.lit > light.shadow * 2, "a wall casts a shadow");
 
+  // Media: the same lamp seen through water turns blue-green and dimmer;
+  // seen through smoke it is dimmer.
+  const media = await page.evaluate(async () => {
+    const { engine } = window.lume;
+    const at = (x, y) => engine.lightAt(x, y);
+    const contribution = async (fill) => {
+      engine.clear();
+      fill();
+      engine.paint(7, [128, 80], [128, 80], 4);
+      engine.light();
+      const right = await at(170, 80); // across the medium
+      const left = await at(86, 80); // same distance, open air
+      engine.paint(0, [128, 80], [128, 80], 5);
+      engine.light();
+      const r0 = await at(170, 80);
+      const l0 = await at(86, 80);
+      return { through: right.map((v, i) => v - r0[i]), open: left.map((v, i) => v - l0[i]) };
+    };
+    const fillRect = (m) => {
+      for (let i = 0; i < 16; i++) for (let y = 66; y <= 94; y += 2) engine.paint(m, [138, y], [175, y], 2);
+    };
+    return { water: await contribution(() => fillRect(3)), smoke: await contribution(() => fillRect(5)) };
+  });
+  console.log("media", JSON.stringify(media));
+  const sum = (v) => v[0] + v[1] + v[2];
+  const { water, smoke } = media;
+  check(
+    sum(water.through) < sum(water.open) && water.through[2] / water.through[0] > 1.5 * (water.open[2] / water.open[0]),
+    "light through water is dimmer and bluer",
+  );
+  check(sum(smoke.through) < 0.8 * sum(smoke.open), "smoke dims light");
+
+  // Fire burns wood down to ash and smoke.
+  const fire = await page.evaluate(async () => {
+    const { engine } = window.lume;
+    engine.clear();
+    engine.paint(1, [0, 150], [255, 150], 3);
+    engine.paint(9, [100, 110], [140, 110], 10); // a log
+    const before = await engine.census();
+    engine.paint(8, [95, 125], [145, 125], 6); // fire under it
+    for (let i = 0; i < 400; i++) engine.tick(2, false);
+    await engine.idle();
+    return { before, after: await engine.census() };
+  });
+  console.log("fire", JSON.stringify(fire.after));
+  check(fire.after.wood < fire.before.wood * 0.5, `fire burns wood (${fire.before.wood} → ${fire.after.wood})`);
+  check(fire.after.ash > 0, "burnt wood leaves ash");
+
   // The opening scene should run at full size without errors.
   await page.goto(`http://localhost:${PORT}/?draw=0`);
   await page.waitForFunction(() => window.lume, null, { timeout: 20000 });
