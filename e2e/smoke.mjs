@@ -161,6 +161,33 @@ try {
   check(fire.after.wood < fire.before.wood * 0.5, `fire burns wood (${fire.before.wood} → ${fire.after.wood})`);
   check(fire.after.ash > 0, "burnt wood leaves ash");
 
+  // Lava fuses sand into glass, and glass lets light through.
+  const glass = await page.evaluate(async () => {
+    const { engine } = window.lume;
+    engine.clear();
+    engine.paint(1, [0, 150], [255, 150], 3);
+    for (let i = 0; i < 12; i++) engine.paint(4, [80, 140], [170, 140], 6); // lava pool
+    for (let i = 0; i < 12; i++) engine.paint(2, [90, 110], [160, 110], 8); // sand on it
+    for (let i = 0; i < 300; i++) engine.tick(2, false);
+    await engine.idle();
+    const fused = (await engine.census()).glass;
+
+    const behind = async (m) => {
+      engine.clear();
+      engine.paint(m, [120, 40], [120, 120], 3);
+      engine.paint(7, [60, 80], [60, 80], 4);
+      engine.light();
+      const lit = (await engine.lightAt(140, 80)).reduce((a, b) => a + b, 0);
+      engine.paint(0, [60, 80], [60, 80], 5);
+      engine.light();
+      return lit - (await engine.lightAt(140, 80)).reduce((a, b) => a + b, 0);
+    };
+    return { fused, throughGlass: await behind(11), throughWall: await behind(1) };
+  });
+  console.log("glass", JSON.stringify(glass));
+  check(glass.fused > 0, `lava fuses sand into glass (${glass.fused} cells)`);
+  check(glass.throughGlass > 0.02 && glass.throughWall === 0, "glass lets light through, a wall does not");
+
   // The opening scene should run at full size without errors.
   await page.goto(`http://localhost:${PORT}/?draw=0`);
   await page.waitForFunction(() => window.lume, null, { timeout: 20000 });

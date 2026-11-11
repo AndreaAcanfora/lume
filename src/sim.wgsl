@@ -30,6 +30,7 @@ const LAMP = 7u;
 const FIRE = 8u;
 const WOOD = 9u;
 const ASH = 10u;
+const GLASS = 11u;
 
 fn mat(c: u32) -> u32 { return c & 0xffu; }
 
@@ -44,11 +45,11 @@ fn density(m: u32) -> i32 {
     case 10u: { return 25; } // ash
     case 4u: { return 30; }  // lava
     case 2u: { return 40; }  // sand
-    default: { return 100; } // wall, stone, lamp, wood
+    default: { return 100; } // wall, stone, lamp, wood, glass
   }
 }
 
-fn movable(m: u32) -> bool { return m != WALL && m != STONE && m != LAMP && m != WOOD; }
+fn movable(m: u32) -> bool { return m != WALL && m != STONE && m != LAMP && m != WOOD && m != GLASS; }
 
 // Cells that flow sideways: liquids, gas and the air they flow into.
 fn fluid(m: u32) -> bool { return m == EMPTY || m == WATER || m == LAVA || m == SMOKE || m == FIRE; }
@@ -102,6 +103,16 @@ fn step(@builtin(global_invocation_id) id: vec3u) {
     tr = react(tr, r >> 3u);
     bl = react(bl, r >> 6u);
     br = react(br, r >> 9u);
+  }
+  r = pcg(r);
+
+  // Lava fuses the sand it touches into glass.
+  let hasSand = mat(tl) == SAND || mat(tr) == SAND || mat(bl) == SAND || mat(br) == SAND;
+  if (hasLava && hasSand && (r & 15u) == 0u) {
+    tl = fuse(tl);
+    tr = fuse(tr);
+    bl = fuse(bl);
+    br = fuse(br);
   }
   r = pcg(r);
 
@@ -177,6 +188,11 @@ fn react(c: u32, roll: u32) -> u32 {
     case 3u: { return SMOKE | shade | ((160u + (roll & 63u)) << 16u); }
     default: { return c; }
   }
+}
+
+fn fuse(c: u32) -> u32 {
+  if (mat(c) == SAND) { return GLASS | (c & 0xff00u); }
+  return c;
 }
 
 fn withLife(m: u32, c: u32, life: u32) -> u32 {

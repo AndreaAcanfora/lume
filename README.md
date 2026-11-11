@@ -27,6 +27,7 @@ compare with flat colours.
 | 8 | Fire | rises, flickers and burns out into smoke; sets wood alight, goes out in water |
 | 9 | Wood | fixed; burns down to ash when fire or lava touches it |
 | | Ash | what burnt wood leaves; a light powder |
+| G | Glass | fixed and clear: lets light through with a faint green tint; lava fuses sand into it |
 | 0 | Erase | |
 
 Drag to paint. Space pauses, R reloads the opening scene.
@@ -67,8 +68,8 @@ Light runs at half the grid's resolution in four compute stages:
 1. **Scene**: each texel records what it emits and how much light it
    absorbs per texel of travel, per colour channel. Sand, ash, wood, walls,
    stone, lava and lamps are opaque. Water absorbs red first, so light
-   under water turns blue-green; smoke greys light out by its density; fire
-   glows and barely absorbs.
+   under water turns blue-green; smoke greys light out by its density; glass
+   lets it through with a faint green tint; fire glows and barely absorbs.
 2. **Jump flood**: every texel learns where the nearest non-empty texel is,
    so rays leap across empty air; through water, smoke and fire they step
    one texel at a time, gathering light and losing some as they go.
@@ -99,7 +100,8 @@ checks that not a single cell of either was created or lost, that the sand
 fell and that the water spread out. It then places a lamp beside a wall and
 checks that its light fades with distance and that the wall casts a shadow,
 that the same lamp seen through water is dimmer and bluer and through smoke
-dimmer, and that fire burns a log down to ash.
+dimmer, that fire burns a log down to ash, that lava fuses sand into glass
+and that light passes through glass but not through a wall.
 
 ## License
 
