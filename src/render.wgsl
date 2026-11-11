@@ -35,6 +35,7 @@ fn palette(m: u32) -> vec3f {
     case 8u: { return vec3f(1.00, 0.55, 0.12); } // fire
     case 9u: { return vec3f(0.45, 0.28, 0.14); } // wood
     case 10u: { return vec3f(0.55, 0.53, 0.50); } // ash
+    case 11u: { return vec3f(0.55, 0.85, 0.80); } // glass
     default: { return BACKGROUND; }
   }
 }
@@ -69,6 +70,9 @@ fn shade(color: vec3f, m: u32, pos: vec2f) -> vec3f {
     c = color * 1.6;
   } else if (m == 0u) {
     c = color * 0.4 + fluenceAt(pos) * 0.12;
+  } else if (m == 11u) {
+    // Glass lets light through: a faint body that glows with what crosses it.
+    c = color * (0.08 + fluenceAt(pos) * 1.2);
   } else if (m == 1u || m == 2u || m == 6u || m == 9u || m == 10u) {
     c = color * (0.04 + surfaceLight(pos) * 2.5);
   } else {

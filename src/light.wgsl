@@ -59,6 +59,7 @@ fn absorption(c: u32) -> vec3f {
     case 3u: { return vec3f(0.16, 0.05, 0.025); }  // water
     case 5u: { return vec3f(0.08 * life + 0.01); } // smoke
     case 8u: { return vec3f(0.02); }               // fire
+    case 11u: { return vec3f(0.05, 0.015, 0.03); } // glass, faintly green
     default: { return vec3f(0.0); }
   }
 }

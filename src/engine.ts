@@ -15,10 +15,11 @@ export const Material = {
   Fire: 8,
   Wood: 9,
   Ash: 10,
+  Glass: 11,
 } as const;
 export type Material = (typeof Material)[keyof typeof Material];
 
-export const MATERIAL_NAMES = ["empty", "wall", "sand", "water", "lava", "smoke", "stone", "lamp", "fire", "wood", "ash"] as const;
+export const MATERIAL_NAMES = ["empty", "wall", "sand", "water", "lava", "smoke", "stone", "lamp", "fire", "wood", "ash", "glass"] as const;
 
 // Each step runs the two Margolus phases: blocks at (0,0) and at (1,1).
 const OFFSETS: ReadonlyArray<[number, number]> = [

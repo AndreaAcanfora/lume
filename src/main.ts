@@ -12,6 +12,7 @@ const PALETTE: { material: Material; label: string; key: string }[] = [
   { material: Material.Lamp, label: "Lamp", key: "7" },
   { material: Material.Fire, label: "Fire", key: "8" },
   { material: Material.Wood, label: "Wood", key: "9" },
+  { material: Material.Glass, label: "Glass", key: "g" },
   { material: Material.Empty, label: "Erase", key: "0" },
 ];
 
