@@ -44,6 +44,18 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 
+  // Brush strokes draw their per-cell dice from Math.random: seed it so every
+  // run simulates the same world and the thresholds below are not luck.
+  await page.addInitScript(() => {
+    let seed = 0x1ce;
+    Math.random = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = seed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  });
   await page.goto(`http://localhost:${PORT}/?w=256&h=160&draw=0`);
   await page.waitForFunction(() => window.lume, null, { timeout: 20000 });
 
