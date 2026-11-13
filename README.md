@@ -92,6 +92,7 @@ The cost is the same for one light or a thousand.
 npm install
 npm run dev        # http://localhost:5173
 npm run build
+npm test           # unit tests (Vitest)
 npm run test:e2e   # headless Chromium on SwiftShader's WebGPU
 ```
 
@@ -101,7 +102,12 @@ fell and that the water spread out. It then places a lamp beside a wall and
 checks that its light fades with distance and that the wall casts a shadow,
 that the same lamp seen through water is dimmer and bluer and through smoke
 dimmer, that fire burns a log down to ash, that lava fuses sand into glass
-and that light passes through glass but not through a wall.
+and that light passes through glass but not through a wall. `Math.random`
+is seeded in the page, so every run simulates the same world.
+
+The unit tests check the opening scene: same seed, same world; any size;
+stone floor; lava above a basin of water that rests on stone; sand on the
+left ledge; two trees on the right, only the first one burning.
 
 ## License
 
