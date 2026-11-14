@@ -5,8 +5,9 @@
 // the update runs in place with no races and no second buffer. Alternating the
 // block offset between (0,0) and (1,1) lets matter cross block borders.
 //
-// A cell is a u32: bits 0-7 material, 8-15 shade, 16-23 life (smoke, fire),
-// bit 24 flips the direction a liquid flows in (see flow()).
+// A cell is a u32: bits 0-7 material, 8-15 shade, 16-23 life (smoke, fire)
+// or support (solids, see hold()), bit 24 flips the direction a liquid
+// flows in (see flow()).
 
 struct Params {
   size: vec2u,
@@ -50,24 +51,32 @@ fn density(m: u32) -> i32 {
   }
 }
 
-// Walls, lamps and wood stay where they are drawn (wood is what trees are
-// made of). Everything else falls.
-fn movable(m: u32) -> bool { return m != WALL && m != LAMP && m != WOOD; }
+// Lamps stay where they are drawn. Everything else can fall.
+fn movable(m: u32) -> bool { return m != LAMP; }
 
-// Glass and stone are solid and heavy: they drop straight down through air,
-// gas and liquids but never slide or pile up, so a slab falls in one piece
-// and comes to rest on whatever is under it.
-fn rigid(m: u32) -> bool { return m == GLASS || m == STONE; }
+// Solids: they never slide or pile up, they drop straight down when nothing
+// holds them, so a slab falls in one piece. Wall, glass and stone sink
+// through liquids; wood floats.
+fn rigid(m: u32) -> bool { return m == WALL || m == STONE || m == GLASS || m == WOOD; }
 
 fn liquid(m: u32) -> bool { return m == WATER || m == LAVA; }
+fn open(m: u32) -> bool { return m == EMPTY || m == SMOKE || m == FIRE; }
+
+// What a solid can fall into.
+fn fallsInto(m: u32, below: u32) -> bool {
+  if (m == WOOD) { return open(below); }
+  return fluid(below);
+}
 
 // Cells that flow sideways: liquids, gas and the air they flow into.
 fn fluid(m: u32) -> bool { return m == EMPTY || m == WATER || m == LAVA || m == SMOKE || m == FIRE; }
 
-// Lava is viscous: it moves on only some of the passes.
+// Lava is viscous: it moves on only some of the passes. Smoke and fire run
+// at half speed so they keep their pace at 4 steps per frame.
 fn mobility(m: u32) -> u32 {
   if (m == LAVA) { return 96u; }
-  if (m == FIRE) { return 160u; } // flickers upward rather than shooting
+  if (m == FIRE) { return 80u; } // flickers upward rather than shooting
+  if (m == SMOKE) { return 128u; }
   return 256u;
 }
 
@@ -82,8 +91,9 @@ fn sinks(a: u32, b: u32, roll: u32) -> bool {
   let ma = mat(a);
   let mb = mat(b);
   if (!movable(ma) || !movable(mb)) { return false; }
-  if (rigid(ma)) { return fluid(mb); }
-  if (rigid(mb)) { return false; }
+  if (rigid(ma)) { return support(a) == 0u && fallsInto(ma, mb); }
+  // Wood floats: a liquid above loose wood takes its place.
+  if (rigid(mb)) { return mb == WOOD && liquid(ma) && support(b) == 0u && (roll & 0xffu) < mobility(ma); }
   if (density(ma) <= density(mb)) { return false; }
   // The moving one is whichever is not air/smoke; use the slower of the two.
   return (roll & 0xffu) < min(mobility(ma), mobility(mb));
@@ -145,6 +155,16 @@ fn step(@builtin(global_invocation_id) id: vec3u) {
   br = age(br, r >> 24u);
   r = pcg(r);
 
+  // Solids work out what holds them up. The bottom row of the grid is the
+  // ground. Each cell sees only its block, so it sees below and one side on
+  // one offset, above and the other side on the next.
+  let ground = y + 2u >= P.size.y;
+  let s0 = array<u32, 4>(tl, tr, bl, br);
+  tl = hold(s0[0], s0[2], true, false, s0[1], s0[0], false);
+  tr = hold(s0[1], s0[3], true, false, s0[0], s0[1], false);
+  bl = hold(s0[2], s0[2], false, ground, s0[3], s0[0], true);
+  br = hold(s0[3], s0[3], false, ground, s0[2], s0[1], true);
+
   // 1. Straight down.
   let fellL = sinks(tl, bl, r);
   let fellR = sinks(tr, br, r >> 8u);
@@ -157,8 +177,8 @@ fn step(@builtin(global_invocation_id) id: vec3u) {
     r = pcg(r);
     let leftFirst = (r & 1u) == 0u;
     var moved = false;
-    let slideL = !rigid(mat(tl));
-    let slideR = !rigid(mat(tr));
+    let slideL = !rigid(mat(tl)) && !rigid(mat(br));
+    let slideR = !rigid(mat(tr)) && !rigid(mat(bl));
     if (leftFirst && slideL && density(mat(bl)) >= density(mat(tl)) && sinks(tl, br, r >> 1u)) {
       let t = tl; tl = br; br = t; moved = true;
     }
@@ -194,7 +214,6 @@ fn step(@builtin(global_invocation_id) id: vec3u) {
 // XORed with a shade bit, so freshly painted liquid sets off both ways.
 fn flowsRight(c: u32) -> bool { return (((c >> 24u) ^ (c >> 8u)) & 1u) == 1u; }
 fn turn(c: u32) -> u32 { return c ^ (1u << 24u); }
-fn open(m: u32) -> bool { return m == EMPTY || m == SMOKE || m == FIRE; }
 
 // a is left of b. Returns the pair after one sideways move.
 fn flow(a: u32, b: u32, roll: u32) -> vec2u {
@@ -254,7 +273,7 @@ fn withLife(m: u32, c: u32, life: u32) -> u32 {
 
 fn burn(c: u32, wet: bool, roll: u32) -> u32 {
   let m = mat(c);
-  if (m == WOOD && (roll & 31u) == 0u) {
+  if (m == WOOD && (roll & 63u) == 0u) {
     // Most of the wood goes up in flames; some is left as ash.
     if (((roll >> 5u) & 3u) == 0u) { return ASH | (c & 0xff00u); }
     return withLife(FIRE, c, 60u + ((roll >> 7u) & 63u));
@@ -268,12 +287,12 @@ fn age(c: u32, roll: u32) -> u32 {
   let m = mat(c);
   let life = (c >> 16u) & 0xffu;
   if (m == SMOKE) {
-    if ((roll & 3u) != 0u) { return c; }
+    if ((roll & 7u) != 0u) { return c; }
     if (life <= 1u) { return EMPTY | (c & 0xff00u); }
     return withLife(SMOKE, c, life - 1u);
   }
   if (m == FIRE) {
-    if ((roll & 1u) != 0u) { return c; }
+    if ((roll & 3u) != 0u) { return c; }
     if (life <= 1u) {
       if (((roll >> 1u) & 1u) == 0u) { return withLife(SMOKE, c, 80u + ((roll >> 2u) & 63u)); }
       return EMPTY | (c & 0xff00u);
@@ -281,4 +300,31 @@ fn age(c: u32, roll: u32) -> u32 {
     return withLife(FIRE, c, life - 1u);
   }
   return c;
+}
+
+// Support of a solid: 255 when it rests on the ground or on something that
+// is not a fluid, the support of the solid it stands on, or one less than a
+// neighbour of the same material beside or above it (so a shelf hangs from a
+// pillar and a crown from its trunk, up to 255 cells out). Otherwise it
+// decays by one per pass; at 0 the cell falls. A cut-off piece keeps falling
+// apart in no more than 255 passes, about half a second.
+const HELD = 255u;
+fn support(c: u32) -> u32 { return (c >> 16u) & 0xffu; }
+fn withSupport(c: u32, s: u32) -> u32 { return (c & 0xff00ffffu) | (s << 16u); }
+fn hold(c: u32, below: u32, seesBelow: bool, ground: bool, side: u32, above: u32, seesAbove: bool) -> u32 {
+  let m = mat(c);
+  if (!rigid(m)) { return c; }
+  var s = max(support(c), 1u) - 1u;
+  if (ground) { s = HELD; }
+  if (seesBelow) {
+    let mb = mat(below);
+    if (rigid(mb)) {
+      s = max(s, support(below));
+    } else if (!fluid(mb)) {
+      s = HELD; // sand, ash, a lamp... (a liquid buoys wood up, it does not hold it)
+    }
+  }
+  if (mat(side) == m) { s = max(s, max(support(side), 1u) - 1u); }
+  if (seesAbove && mat(above) == m) { s = max(s, max(support(above), 1u) - 1u); }
+  return withSupport(c, s);
 }

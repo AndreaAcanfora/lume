@@ -59,6 +59,9 @@ fn paint(@builtin(global_invocation_id) id: vec3u) {
   var life = 0u;
   if (m == SMOKE) { life = 120u + ((r >> 16u) & 127u); }
   if (m == FIRE) { life = 50u + ((r >> 16u) & 63u); }
+  // Fresh solids get a moment of support, so a shelf drawn out from a wall
+  // has time to learn it hangs from it (sim.wgsl, hold()) before it drops.
+  if (solid && m != LAMP) { life = 128u; }
   cells[i] = m | (((r >> 8u) & 0xffu) << 8u) | (life << 16u);
 }
 

@@ -64,7 +64,7 @@ try {
     pause(true);
     engine.clear();
     // A box with a floor and a pillar, with sand and water poured in.
-    engine.paint(1, [0, 150], [255, 150], 3); // wall floor
+    engine.paint(1, [0, 157], [255, 157], 3); // wall floor
     engine.paint(1, [2, 0], [2, 150], 2); // left wall
     engine.paint(1, [253, 0], [253, 150], 2); // right wall
     engine.paint(6, [128, 60], [128, 100], 4); // stone pillar
@@ -161,23 +161,27 @@ try {
   const fire = await page.evaluate(async () => {
     const { engine } = window.lume;
     engine.clear();
-    engine.paint(1, [0, 150], [255, 150], 3);
-    engine.paint(9, [100, 110], [140, 110], 10); // a log
+    engine.paint(1, [0, 157], [255, 157], 3);
+    engine.paint(1, [102, 120], [102, 155], 2); // two posts (wood falls now)
+    engine.paint(1, [138, 120], [138, 155], 2);
+    engine.paint(9, [100, 110], [140, 110], 10); // a log on them
     const before = await engine.census();
     engine.paint(8, [95, 125], [145, 125], 6); // fire under it
-    for (let i = 0; i < 400; i++) engine.tick(2, false);
+    for (let i = 0; i < 800; i++) engine.tick(2, false); // fire runs at half speed per step
     await engine.idle();
     return { before, after: await engine.census() };
   });
   console.log("fire", JSON.stringify(fire.after));
-  check(fire.after.wood < fire.before.wood * 0.5, `fire burns wood (${fire.before.wood} → ${fire.after.wood})`);
+  // Burnt-through pieces now drop below the flames and go out, so less of the
+  // log burns than when wood was fixed in place.
+  check(fire.after.wood < fire.before.wood * 0.6, `fire burns wood (${fire.before.wood} → ${fire.after.wood})`);
   check(fire.after.ash > 0, "burnt wood leaves ash");
 
   // Lava fuses sand into glass, and glass lets light through.
   const glass = await page.evaluate(async () => {
     const { engine } = window.lume;
     engine.clear();
-    engine.paint(1, [0, 150], [255, 150], 3);
+    engine.paint(1, [0, 157], [255, 157], 3);
     for (let i = 0; i < 12; i++) engine.paint(4, [80, 140], [170, 140], 6); // lava pool
     for (let i = 0; i < 12; i++) engine.paint(2, [90, 110], [160, 110], 8); // sand on it
     for (let i = 0; i < 300; i++) engine.tick(2, false);
@@ -211,7 +215,7 @@ try {
     };
     // A tall block of water dropped at one end of a box.
     engine.clear();
-    engine.paint(1, [0, 150], [255, 150], 3);
+    engine.paint(1, [0, 157], [255, 157], 3);
     engine.paint(1, [6, 0], [6, 150], 2);
     engine.paint(1, [249, 0], [249, 150], 2);
     for (let i = 0; i < 10; i++) engine.paint(3, [30, 20], [70, 60], 14);
@@ -236,7 +240,7 @@ try {
       return { n, top, bottom, left, right };
     };
     engine.clear();
-    engine.paint(1, [0, 150], [255, 150], 3);
+    engine.paint(1, [0, 157], [255, 157], 3);
     for (let i = 0; i < 6; i++) engine.paint(2, [20, 146], [90, 146], 4); // a bed of sand under the glass
     engine.paint(11, [40, 40], [70, 40], 5);
     for (let i = 0; i < 12; i++) engine.paint(3, [150, 140], [230, 140], 8); // a pool under the stone
@@ -259,6 +263,71 @@ try {
     stoneAfter.n === stoneBefore.n && stoneAfter.bottom >= 145,
     `stone sinks through the pool to the floor (bottom row ${stoneBefore.bottom} → ${stoneAfter.bottom})`,
   );
+
+  // Walls fall unless something holds them; wood floats; a crown hangs from its trunk.
+  const solids = await page.evaluate(async () => {
+    const { engine } = window.lume;
+    const W = engine.width;
+    const run = async (ticks) => {
+      for (let i = 0; i < ticks; i++) engine.tick(2, false);
+      await engine.idle();
+      return engine.read();
+    };
+    const box = (cells, m, x0 = 0, x1 = W) => {
+      let n = 0, top = 999, bottom = 0;
+      cells.forEach((c, i) => {
+        const x = i % W, y = Math.floor(i / W);
+        if ((c & 0xff) !== m || x < x0 || x >= x1) return;
+        n++; top = Math.min(top, y); bottom = Math.max(bottom, y);
+      });
+      return { n, top, bottom };
+    };
+    engine.clear();
+    engine.paint(1, [0, 157], [255, 157], 3); // floor
+    engine.paint(1, [20, 30], [60, 30], 2); // a wall in mid-air
+    engine.paint(1, [90, 60], [90, 152], 3); // a pillar on the floor...
+    engine.paint(1, [90, 60], [150, 60], 2); // ...with a shelf out from it
+    engine.paint(1, [165, 100], [165, 155], 2); // a tank...
+    engine.paint(1, [252, 100], [252, 155], 2);
+    for (let i = 0; i < 12; i++) engine.paint(3, [172, 125], [246, 125], 12); // ...of water
+    engine.paint(9, [195, 145], [225, 145], 3); // a log at the bottom of it
+    let cells = await run(300);
+    const result = {
+      loose: box(cells, 1, 0, 70),
+      shelf: box(cells, 1, 100, 160),
+      log: box(cells, 9),
+      water: box(cells, 3, 170, 248),
+    };
+    // Floating: in every column of the log, nothing but air above it.
+    result.submerged = 0;
+    for (let x = 170; x < 248; x++) {
+      let wood = -1;
+      for (let y = 0; y < 160; y++) if ((cells[y * W + x] & 0xff) === 9) { wood = y; break; }
+      if (wood < 0) continue;
+      for (let y = 0; y < wood; y++) if ((cells[y * W + x] & 0xff) === 3) { result.submerged++; break; }
+    }
+    // A tree: cut the trunk and the crown comes down.
+    engine.clear();
+    engine.paint(1, [0, 157], [255, 157], 3);
+    engine.paint(9, [128, 100], [128, 152], 2); // trunk
+    engine.paint(9, [128, 85], [128, 85], 14); // crown
+    cells = await run(100);
+    result.crown = box(cells, 9);
+    engine.paint(0, [128, 130], [128, 140], 4); // saw through the trunk
+    cells = await run(300);
+    result.felled = box(cells, 9);
+    return result;
+  });
+  console.log("solids", JSON.stringify(solids));
+  check(solids.loose.top > 140, `a wall in mid-air falls to the floor (top row ${solids.loose.top})`);
+  check(solids.shelf.top <= 60 && solids.shelf.n > 50, "a shelf hangs from its pillar");
+  check(
+    solids.log.n > 0 && solids.submerged === 0 && solids.log.top < solids.water.top,
+    `wood floats up to the surface (log ${solids.log.top}-${solids.log.bottom}, water from row ${solids.water.top}, ${solids.submerged} columns under water)`,
+  );
+  check(solids.crown.top <= 72, `a crown stays up on its trunk (top row ${solids.crown.top})`);
+  // The cut is about 18 rows tall: the tree drops by that much onto the stump.
+  check(solids.felled.top >= solids.crown.top + 15, `cutting the trunk brings the crown down onto the stump (top row ${solids.crown.top} → ${solids.felled.top})`);
 
   // The opening scene should run at full size without errors.
   await page.goto(`http://localhost:${PORT}/?draw=0`);

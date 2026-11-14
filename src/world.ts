@@ -19,7 +19,9 @@ function mulberry32(seed: number): () => number {
 export function openingScene(width: number, height: number, seed = 7): Uint32Array {
   const rand = mulberry32(seed);
   const cells = new Uint32Array(width * height);
-  const cell = (m: number) => m | (Math.floor(rand() * 256) << 8);
+  // Solids start fully supported (bits 16-23, see hold() in sim.wgsl).
+  const SOLIDS: number[] = [Material.Wall, Material.Stone, Material.Glass, Material.Wood];
+  const cell = (m: number) => m | (Math.floor(rand() * 256) << 8) | (SOLIDS.includes(m) ? 255 << 16 : 0);
   const set = (x: number, y: number, m: number) => {
     if (x >= 0 && y >= 0 && x < width && y < height) cells[y * width + x] = cell(m);
   };
@@ -57,12 +59,19 @@ export function openingScene(width: number, height: number, seed = 7): Uint32Arr
     }
   }
 
-  // A wall ledge on the left with a dune of sand on top.
+  // A wall ledge on the left with a dune of sand on top, standing on two
+  // pillars down to the hill (walls fall when nothing holds them).
   const ledgeY = Math.floor(height * 0.42);
   const ledgeX0 = Math.floor(width * 0.08);
   const ledgeX1 = Math.floor(width * 0.3);
   for (let x = ledgeX0; x < ledgeX1; x++) {
     for (let y = ledgeY; y < ledgeY + 4; y++) set(x, y, Material.Wall);
+  }
+  const pillar = Math.max(2, Math.floor(width * 0.006));
+  for (const px of [ledgeX0, ledgeX1 - pillar]) {
+    for (let x = px; x < px + pillar; x++) {
+      for (let y = ledgeY + 4; y < ground[x]; y++) set(x, y, Material.Wall);
+    }
   }
   // A tall block of sand on it, far steeper than sand can stand.
   const blockH = Math.floor(height * 0.22);
@@ -81,7 +90,7 @@ export function openingScene(width: number, height: number, seed = 7): Uint32Arr
     const cy = base - trunkH - r + 2;
     for (let y = -r; y <= r; y++) {
       for (let x = -r; x <= r; x++) {
-        if (x * x + y * y <= r * r && rand() < 0.8) set(tx + x, cy + y, Material.Wood);
+        if (x * x + y * y <= r * r) set(tx + x, cy + y, Material.Wood);
       }
     }
     if (burning) {
