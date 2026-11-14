@@ -64,3 +64,53 @@ describe("openingScene", () => {
     for (const c of cells) if (mat(c) === Material.Fire) expect(c >>> 16).toBeGreaterThanOrEqual(60);
   });
 });
+
+describe("openingScene solids", () => {
+  const SOLIDS = new Set<number>([Material.Wall, Material.Stone, Material.Glass, Material.Wood]);
+  const FLUIDS = new Set<number>([Material.Empty, Material.Water, Material.Lava, Material.Smoke, Material.Fire]);
+
+  it("start fully supported", () => {
+    const cells = openingScene(W, H);
+    for (const c of cells) if (SOLIDS.has(mat(c))) expect(c >>> 16 & 0xff).toBe(255);
+  });
+
+  // The same rules as hold() in sim.wgsl, without the distance limit: a solid
+  // is held by the ground, by a non-fluid under it, by a solid it stands on,
+  // or by the same material beside or above it.
+  it.each([[W, H], [1280, 800], [640, 400]])("nothing hangs in the air at %ix%i", (w, h) => {
+    const cells = openingScene(w, h);
+    const m = (x: number, y: number) => mat(cells[y * w + x]!);
+    const held = new Uint8Array(w * h);
+    const queue: number[] = [];
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        if (!SOLIDS.has(m(x, y))) continue;
+        const below = y + 1 < h ? m(x, y + 1) : -1;
+        if (y === h - 1 || (!SOLIDS.has(below) && !FLUIDS.has(below))) {
+          held[y * w + x] = 1;
+          queue.push(y * w + x);
+        }
+      }
+    while (queue.length) {
+      const i = queue.pop()!;
+      const x = i % w, y = Math.floor(i / w);
+      const here = m(x, y);
+      const next: [number, number, boolean][] = [
+        [x, y - 1, true], // anything solid standing on it
+        [x - 1, y, false],
+        [x + 1, y, false],
+        [x, y + 1, false], // hanging from it
+      ];
+      for (const [nx, ny, anySolid] of next) {
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx;
+        const nm = m(nx, ny);
+        if (held[j] || !SOLIDS.has(nm) || (!anySolid && nm !== here)) continue;
+        held[j] = 1;
+        queue.push(j);
+      }
+    }
+    const loose = [...cells.keys()].filter((i) => SOLIDS.has(mat(cells[i]!)) && !held[i]);
+    expect(loose.length, `loose solids, e.g. at ${loose.slice(0, 3).map((i) => `(${i % w},${Math.floor(i / w)})`).join(" ")}`).toBe(0);
+  });
+});

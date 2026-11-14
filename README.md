@@ -21,16 +21,24 @@ compare with flat colours.
 | 2 | Water | falls and levels out: each drop keeps flowing one way until something stops it |
 | 3 | Lava | a slow, heavy liquid; turns into stone when it touches water |
 | 4 | Smoke | rises, drifts and fades; water boils into it on lava |
-| 5 | Wall | fixed |
-| 6 | Stone | heavy: drops straight down in one piece through air and liquids; what lava leaves behind |
+| 5 | Wall | solid: stays up while something holds it (the ground, what is under it, or wall it is attached to), otherwise falls |
+| 6 | Stone | solid like wall, and sinks through liquids; what lava leaves behind |
 | 7 | Lamp | fixed; gives off warm light |
 | 8 | Fire | rises, flickers and burns out into smoke; sets wood alight, goes out in water |
-| 9 | Wood | fixed; burns down to ash when fire or lava touches it |
+| 9 | Wood | solid like wall, but floats on water; burns down to ash when fire or lava touches it |
 | | Ash | what burnt wood leaves; a light powder |
-| G | Glass | clear and heavy like stone: falls in one piece, lets light through with a faint green tint; lava fuses sand into it |
+| G | Glass | solid like stone and clear: lets light through with a faint green tint; lava fuses sand into it |
 | 0 | Erase | |
 
 Drag to paint. Space pauses, R reloads the opening scene.
+
+Solids (wall, stone, glass, wood) never slide or pile up: a piece stays up as
+long as something holds it and drops straight down, in one piece, when
+nothing does. Each solid cell carries a support value: full when it rests on
+the ground or on something that is not a fluid, inherited from the solid it
+stands on, and one less from a neighbour of the same material beside or
+above it, so a shelf can reach out from a pillar and a crown from its trunk.
+Cut the trunk and the tree comes down.
 
 ## How it works
 
