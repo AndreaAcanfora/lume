@@ -98,7 +98,7 @@ try {
   check(after.water === before.water, `water is conserved (${before.water} → ${after.water})`);
   check(sandAfter.meanY > sandBefore.meanY + 50, `sand fell (mean row ${sandBefore.meanY.toFixed(0)} → ${sandAfter.meanY.toFixed(0)})`);
   check(waterAfter.span > waterBefore.span + 20, `water spread out (width ${waterBefore.span} → ${waterAfter.span})`);
-  check(after.wall === before.wall && after.stone === before.stone, "solids do not move or vanish");
+  check(after.wall === before.wall && after.stone === before.stone, "walls and stone are conserved");
 
   // Light: a lamp in an empty world lights its surroundings, less with
   // distance, and a wall casts a shadow.
@@ -199,6 +199,66 @@ try {
   console.log("glass", JSON.stringify(glass));
   check(glass.fused > 0, `lava fuses sand into glass (${glass.fused} cells)`);
   check(glass.throughGlass > 0.02 && glass.throughWall === 0, "glass lets light through, a wall does not");
+
+  // Water levels out flat; glass and stone fall in one piece.
+  const gravity = await page.evaluate(async () => {
+    const { engine } = window.lume;
+    const W = engine.width;
+    const run = async (ticks) => {
+      for (let i = 0; i < ticks; i++) engine.tick(2, false);
+      await engine.idle();
+      return engine.read();
+    };
+    // A tall block of water dropped at one end of a box.
+    engine.clear();
+    engine.paint(1, [0, 150], [255, 150], 3);
+    engine.paint(1, [6, 0], [6, 150], 2);
+    engine.paint(1, [249, 0], [249, 150], 2);
+    for (let i = 0; i < 10; i++) engine.paint(3, [30, 20], [70, 60], 14);
+    let cells = await run(800);
+    const tops = [];
+    for (let x = 10; x < 246; x++) {
+      let top = -1;
+      for (let y = 0; y < 150; y++) if ((cells[y * W + x] & 0xff) === 3) { top = y; break; }
+      tops.push(top);
+    }
+    const wet = tops.filter((t) => t >= 0);
+    const water = { columns: wet.length, of: tops.length, bumps: Math.max(...wet) - Math.min(...wet) };
+
+    // A glass slab and a stone slab in mid-air; the stone one over a pool.
+    const box = (m) => {
+      let n = 0, top = 999, bottom = 0, left = 999, right = 0;
+      cells.forEach((c, i) => {
+        if ((c & 0xff) !== m) return;
+        const x = i % W, y = Math.floor(i / W);
+        n++; top = Math.min(top, y); bottom = Math.max(bottom, y); left = Math.min(left, x); right = Math.max(right, x);
+      });
+      return { n, top, bottom, left, right };
+    };
+    engine.clear();
+    engine.paint(1, [0, 150], [255, 150], 3);
+    for (let i = 0; i < 6; i++) engine.paint(2, [20, 146], [90, 146], 4); // a bed of sand under the glass
+    engine.paint(11, [40, 40], [70, 40], 5);
+    for (let i = 0; i < 12; i++) engine.paint(3, [150, 140], [230, 140], 8); // a pool under the stone
+    engine.paint(6, [180, 30], [200, 30], 4);
+    cells = await engine.read();
+    const glassBefore = box(11), stoneBefore = box(6);
+    cells = await run(150);
+    return { water, glassBefore, glassAfter: box(11), stoneBefore, stoneAfter: box(6), sandTop: box(2).top };
+  });
+  console.log("gravity", JSON.stringify(gravity));
+  const { water: pool, glassBefore, glassAfter, stoneBefore, stoneAfter, sandTop } = gravity;
+  check(pool.columns === pool.of && pool.bumps <= 2, `water levels out across the box (${pool.columns}/${pool.of} columns, ${pool.bumps} rows of bumps)`);
+  check(
+    glassAfter.n === glassBefore.n && glassAfter.left === glassBefore.left && glassAfter.right === glassBefore.right &&
+      glassAfter.top > glassBefore.top + 80,
+    `glass falls straight down without breaking up (top row ${glassBefore.top} → ${glassAfter.top})`,
+  );
+  check(glassAfter.bottom <= sandTop + 4, "glass comes to rest on sand instead of sinking through it");
+  check(
+    stoneAfter.n === stoneBefore.n && stoneAfter.bottom >= 145,
+    `stone sinks through the pool to the floor (bottom row ${stoneBefore.bottom} → ${stoneAfter.bottom})`,
+  );
 
   // The opening scene should run at full size without errors.
   await page.goto(`http://localhost:${PORT}/?draw=0`);
