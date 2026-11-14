@@ -5,7 +5,8 @@
 // the update runs in place with no races and no second buffer. Alternating the
 // block offset between (0,0) and (1,1) lets matter cross block borders.
 //
-// A cell is a u32: bits 0-7 material, 8-15 shade, 16-23 life (smoke, fire).
+// A cell is a u32: bits 0-7 material, 8-15 shade, 16-23 life (smoke, fire),
+// bit 24 flips the direction a liquid flows in (see flow()).
 
 struct Params {
   size: vec2u,
@@ -49,7 +50,16 @@ fn density(m: u32) -> i32 {
   }
 }
 
-fn movable(m: u32) -> bool { return m != WALL && m != STONE && m != LAMP && m != WOOD && m != GLASS; }
+// Walls, lamps and wood stay where they are drawn (wood is what trees are
+// made of). Everything else falls.
+fn movable(m: u32) -> bool { return m != WALL && m != LAMP && m != WOOD; }
+
+// Glass and stone are solid and heavy: they drop straight down through air,
+// gas and liquids but never slide or pile up, so a slab falls in one piece
+// and comes to rest on whatever is under it.
+fn rigid(m: u32) -> bool { return m == GLASS || m == STONE; }
+
+fn liquid(m: u32) -> bool { return m == WATER || m == LAVA; }
 
 // Cells that flow sideways: liquids, gas and the air they flow into.
 fn fluid(m: u32) -> bool { return m == EMPTY || m == WATER || m == LAVA || m == SMOKE || m == FIRE; }
@@ -72,6 +82,8 @@ fn sinks(a: u32, b: u32, roll: u32) -> bool {
   let ma = mat(a);
   let mb = mat(b);
   if (!movable(ma) || !movable(mb)) { return false; }
+  if (rigid(ma)) { return fluid(mb); }
+  if (rigid(mb)) { return false; }
   if (density(ma) <= density(mb)) { return false; }
   // The moving one is whichever is not air/smoke; use the slower of the two.
   return (roll & 0xffu) < min(mobility(ma), mobility(mb));
@@ -145,21 +157,27 @@ fn step(@builtin(global_invocation_id) id: vec3u) {
     r = pcg(r);
     let leftFirst = (r & 1u) == 0u;
     var moved = false;
-    if (leftFirst && density(mat(bl)) >= density(mat(tl)) && sinks(tl, br, r >> 1u)) {
+    let slideL = !rigid(mat(tl));
+    let slideR = !rigid(mat(tr));
+    if (leftFirst && slideL && density(mat(bl)) >= density(mat(tl)) && sinks(tl, br, r >> 1u)) {
       let t = tl; tl = br; br = t; moved = true;
     }
-    if (!moved && density(mat(br)) >= density(mat(tr)) && sinks(tr, bl, r >> 9u)) {
+    if (!moved && slideR && density(mat(br)) >= density(mat(tr)) && sinks(tr, bl, r >> 9u)) {
       let t = tr; tr = bl; bl = t; moved = true;
     }
-    if (!moved && !leftFirst && density(mat(bl)) >= density(mat(tl)) && sinks(tl, br, r >> 1u)) {
+    if (!moved && !leftFirst && slideL && density(mat(bl)) >= density(mat(tl)) && sinks(tl, br, r >> 1u)) {
       let t = tl; tl = br; br = t; moved = true;
     }
 
     // 3. Sideways, for liquids and gas that could not move down.
     if (!moved) {
       r = pcg(r);
-      if (spreads(bl, br, r)) { let t = bl; bl = br; br = t; }
-      if (spreads(tl, tr, r >> 8u)) { let t = tl; tl = tr; tr = t; }
+      let bottom = flow(bl, br, r);
+      bl = bottom.x;
+      br = bottom.y;
+      let top = flow(tl, tr, r >> 8u);
+      tl = top.x;
+      tr = top.y;
     }
   }
 
@@ -169,8 +187,43 @@ fn step(@builtin(global_invocation_id) id: vec3u) {
   cells[ibr] = br;
 }
 
-// Two fluid neighbours swap at random when one of them is air or smoke, which
-// levels water and lets smoke drift. Two liquids side by side do not mix.
+// A liquid keeps flowing the way it was going and turns round only when
+// something blocks it. A drop on a flat surface crosses it in a straight line
+// until it finds a lower spot, so a pool levels in a time proportional to its
+// width; a random walk would need the square of it. The direction is bit 24
+// XORed with a shade bit, so freshly painted liquid sets off both ways.
+fn flowsRight(c: u32) -> bool { return (((c >> 24u) ^ (c >> 8u)) & 1u) == 1u; }
+fn turn(c: u32) -> u32 { return c ^ (1u << 24u); }
+fn open(m: u32) -> bool { return m == EMPTY || m == SMOKE || m == FIRE; }
+
+// a is left of b. Returns the pair after one sideways move.
+fn flow(a: u32, b: u32, roll: u32) -> vec2u {
+  let ma = mat(a);
+  let mb = mat(b);
+  if (!liquid(ma) && !liquid(mb)) {
+    if (spreads(a, b, roll)) { return vec2u(b, a); }
+    return vec2u(a, b);
+  }
+  var na = a;
+  var nb = b;
+  if (liquid(ma) && flowsRight(a)) {
+    if (open(mb)) {
+      if ((roll & 0xffu) < mobility(ma)) { return vec2u(b, a); }
+      return vec2u(a, b);
+    }
+    na = turn(a);
+  }
+  if (liquid(mb) && !flowsRight(b)) {
+    if (open(ma)) {
+      if (((roll >> 8u) & 0xffu) < mobility(mb)) { return vec2u(b, a); }
+      return vec2u(na, b);
+    }
+    nb = turn(b);
+  }
+  return vec2u(na, nb);
+}
+
+// Air, smoke and fire side by side swap at random, which lets smoke drift.
 fn spreads(a: u32, b: u32, roll: u32) -> bool {
   let ma = mat(a);
   let mb = mat(b);

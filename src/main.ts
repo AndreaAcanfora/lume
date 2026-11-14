@@ -31,7 +31,7 @@ const query = new URLSearchParams(location.search);
 const small = Math.min(innerWidth, innerHeight) < 600;
 const width = Number(query.get("w")) || (small ? 640 : 1280);
 const height = Number(query.get("h")) || (small ? 400 : 800);
-const steps = Math.min(MAX_STEPS, Number(query.get("steps")) || 2);
+const steps = Math.min(MAX_STEPS, Number(query.get("steps")) || 4);
 // ?draw=0 runs the simulation without presenting it. Headless Chromium can
 // run WebGPU compute but loses the device when it presents a canvas.
 const draw = query.get("draw") !== "0";

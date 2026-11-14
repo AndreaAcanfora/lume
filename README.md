@@ -18,16 +18,16 @@ compare with flat colours.
 | Key | Material | Behaviour |
 | --- | --- | --- |
 | 1 | Sand | falls, piles up at its angle of repose, sinks through water |
-| 2 | Water | falls and levels out |
+| 2 | Water | falls and levels out: each drop keeps flowing one way until something stops it |
 | 3 | Lava | a slow, heavy liquid; turns into stone when it touches water |
 | 4 | Smoke | rises, drifts and fades; water boils into it on lava |
 | 5 | Wall | fixed |
-| 6 | Stone | fixed; what lava leaves behind |
+| 6 | Stone | heavy: drops straight down in one piece through air and liquids; what lava leaves behind |
 | 7 | Lamp | fixed; gives off warm light |
 | 8 | Fire | rises, flickers and burns out into smoke; sets wood alight, goes out in water |
 | 9 | Wood | fixed; burns down to ash when fire or lava touches it |
 | | Ash | what burnt wood leaves; a light powder |
-| G | Glass | fixed and clear: lets light through with a faint green tint; lava fuses sand into it |
+| G | Glass | clear and heavy like stone: falls in one piece, lets light through with a faint green tint; lava fuses sand into it |
 | 0 | Erase | |
 
 Drag to paint. Space pauses, R reloads the opening scene.
@@ -59,7 +59,7 @@ and ripple texture) and a lifetime in 16–23.
 | [`src/engine.ts`](src/engine.ts) | buffers, pipelines and dispatch |
 
 URL parameters: `?w=1920&h=1080` sets the grid size, `?steps=4` the steps per
-frame (up to 4).
+frame (4 by default, up to 8).
 
 ### Light
 

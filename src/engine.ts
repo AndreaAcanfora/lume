@@ -28,7 +28,7 @@ const OFFSETS: ReadonlyArray<[number, number]> = [
 ];
 
 /** Most steps one tick can run. Each step needs its own parameter buffers. */
-export const MAX_STEPS = 4;
+export const MAX_STEPS = 8;
 
 export class Engine {
   readonly width: number;
